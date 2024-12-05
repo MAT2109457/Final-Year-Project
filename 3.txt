@@ -1,0 +1,229 @@
+#define _USE_MATH_DEFINES
+#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <unordered_map>
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <random>
+#include <fstream>
+#include <string>
+#include <windows.h> 
+
+// Generate audio data (analog piano tone with decay at the end)
+std::vector<sf::Int16> generatePianoTone(double frequency, int sampleRate, int durationMs) {
+    int sampleCount = sampleRate * durationMs / 1000;
+    std::vector<sf::Int16> samples(sampleCount);
+
+    double amplitude = 30000;
+    double twoPiF = 2 * M_PI * frequency;
+
+     // Use harmonic superposition and decay functions to simulate piano tones.
+    for (int i = 0; i < sampleCount; ++i) {
+        double time = i / static_cast<double>(sampleRate);
+        double envelope = (1.0 - static_cast<double>(i) / sampleCount);  // 衰减包络
+
+        // 1st (fundamental), 2nd and 3rd harmonics with decreasing amplitudes
+        double wave = amplitude * envelope * (
+            0.6 * sin(twoPiF * time) +          // Fundamental frequency
+            0.3 * sin(2 * twoPiF * time) +      // 2nd harmonic
+            0.1 * sin(3 * twoPiF * time)        // 3rd harmonic
+            );
+
+        samples[i] = static_cast<sf::Int16>(wave);
+    }
+
+    return samples;
+}
+
+// Generate rhythmic time values using a random rhythmic pattern
+std::pair<std::vector<int>, int> generateRandomRhythm(std::mt19937& rng) {
+    std::uniform_int_distribution<int> dist(1, 8);  
+    int selectedPattern = dist(rng);  
+    std::vector<int> rhythm;
+
+    switch (selectedPattern) {
+    case 1:  
+        rhythm = { 400, 200, 400, 200 };
+        break;
+    case 2:  
+        rhythm = { 600, 200, 600, 200 };
+        break;
+    case 3:  
+        rhythm = { 300, 300, 400, 100 };
+        break;
+    case 4: 
+        rhythm = { 133, 133, 133, 133 };
+        break;
+    case 5: 
+        rhythm = { 133, 133, 133, 400 };
+        break;
+    case 6:  
+        rhythm = { 400, 200, 200 };
+        break;
+    case 7:  
+        rhythm = { 400, 200, 400, 200 };
+        break;
+    case 8:
+        rhythm = { 500, 250, 750, 250, 1000, 500, 250 };
+        break;
+    }
+
+    return { rhythm, selectedPattern };
+}
+
+// Generate L-System curve
+std::string generateLSystem(int iterations, const std::string& axiom, const std::unordered_map<char, std::string>& rules) {
+    std::string current = axiom;
+
+    for (int i = 0; i < iterations; ++i) {
+        std::string next = "";
+        for (char c : current) {
+            if (rules.find(c) != rules.end()) {
+                next += rules.at(c);
+            }
+            else {
+                next += c;
+            }
+        }
+        current = next;
+    }
+    return current;
+}
+
+// Plotting curves with SFML
+void drawSierpinskiCurve(sf::RenderWindow& window, const std::string& lsystem, float length, float angle, const sf::Vector2f& offset) {
+    sf::VertexArray lines(sf::LinesStrip);
+    sf::Vector2f position(window.getSize().x / 2 + offset.x, window.getSize().y / 2 + offset.y);
+    float currentAngle = 0;
+
+    lines.append(sf::Vertex(position, sf::Color::White));
+
+    for (char command : lsystem) {
+        if (command == 'F' || command == 'G') {
+            sf::Vector2f newPos(position.x + length * cos(currentAngle * M_PI / 180.0),
+                position.y + length * sin(currentAngle * M_PI / 180.0));
+            lines.append(sf::Vertex(newPos, sf::Color::White));
+            position = newPos;
+        }
+        else if (command == '+') {
+            currentAngle += angle; // Rotate using degrees
+        }
+        else if (command == '-') {
+            currentAngle -= angle;
+        }
+    }
+
+    window.draw(lines);
+}
+
+// Convert curves to music and vocalize them while generating scores
+void convertCurveToMusic(const std::string& lsystem, std::mt19937& rng, const std::string& outputFilename) {
+    double base_freq = 261.63;  
+    double semitone_ratio = pow(2.0, 1.0 / 12.0);
+    int sampleRate = 44100;  
+
+    sf::Sound sound;
+    sf::SoundBuffer buffer;
+
+   // Note name mapping
+    std::unordered_map<int, std::string> noteNames = {
+        {0, "C"}, {1, "C#"}, {2, "D"}, {3, "D#"}, {4, "E"},
+        {5, "F"}, {6, "F#"}, {7, "G"}, {8, "G#"}, {9, "A"},
+        {10, "A#"}, {11, "B"}
+    };
+
+    double current_freq = base_freq;
+    auto rhythmResult = generateRandomRhythm(rng);  // 使用 pair 解包节奏模式和选择
+    std::vector<int> rhythm = rhythmResult.first;
+    int selectedPattern = rhythmResult.second;
+
+    int rhythmIndex = 0;
+
+    std::ofstream outputFile(outputFilename);
+    if (!outputFile.is_open()) {
+        std::cerr << "Unable to create file：" << outputFilename << std::endl;
+        return;
+    }
+
+    outputFile << "Selected rhythm pattern: " << selectedPattern << "\n";
+    outputFile << "Notes:\n";
+
+    for (char command : lsystem) {
+        if (command == 'F' || command == 'G') {
+            int durationMs = rhythm[rhythmIndex % rhythm.size()];
+            rhythmIndex++;
+
+           // If the rhythmic pattern cycles out, regenerate a new rhythmic pattern
+            if (rhythmIndex % rhythm.size() == 0) {
+                rhythmResult = generateRandomRhythm(rng);
+                rhythm = rhythmResult.first;
+                selectedPattern = rhythmResult.second;
+                outputFile << "\nNew rhythm pattern: " << selectedPattern << "\n";
+            }
+
+            std::vector<sf::Int16> samples = generatePianoTone(current_freq, sampleRate, durationMs);
+
+             // Calculate the index of the note, which is used to label the tone name.
+            int noteIndex = static_cast<int>(round(log(current_freq / base_freq) / log(semitone_ratio))) % 12;
+            if (noteIndex < 0) noteIndex += 12;
+
+            if (buffer.loadFromSamples(samples.data(), samples.size(), 1, sampleRate)) {
+                sound.setBuffer(buffer);
+                sound.play();
+                outputFile << "Note frequency: " << current_freq << " Hz ("
+                    << noteNames[noteIndex] << "), Duration: " << durationMs << " ms\n";
+                sf::sleep(sf::milliseconds(durationMs));
+            }
+        }
+        else if (command == '+') {
+            current_freq *= semitone_ratio;
+        }
+        else if (command == '-') {
+            current_freq /= semitone_ratio;
+        }
+    }
+
+    outputFile.close();
+
+   // Open the generated file
+    ShellExecute(0, "open", outputFilename.c_str(), 0, 0, SW_SHOW);
+}
+
+
+int main() {
+    std::unordered_map<char, std::string> rules = {
+        {'F', "F-G+F+G-F"},
+        {'G', "GG"}
+    };
+    std::string axiom = "F-G-G";
+    int iterations = 4;
+    float length = 10.0f;
+    float angle = 120.0f;
+
+    std::string outputFilename = "sierpinski_music.txt";
+
+    std::random_device rd;
+    std::mt19937 rng(rd());
+
+    std::string lsystem = generateLSystem(iterations, axiom, rules);
+
+    sf::RenderWindow window(sf::VideoMode(800, 600), "Sierpinski Curve");
+    sf::Vector2f offset(-200, -150);
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed)
+                window.close();
+        }
+
+        window.clear();
+        drawSierpinskiCurve(window, lsystem, length, angle, offset);
+        window.display();
+    }
+
+    convertCurveToMusic(lsystem, rng, outputFilename);
+
+    return 0;
+}

@@ -1,0 +1,138 @@
+#define _USE_MATH_DEFINES
+#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <cmath>
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <iostream>
+#include <algorithm>
+
+// L-System for generating dragon curves
+std::string generateLSystem(int iterations, std::string axiom,
+    std::unordered_map<char, std::string> rules) {
+    std::string current = axiom;
+
+   // Iterate to generate L-System strings
+    for (int i = 0; i < iterations; ++i) {
+        std::string next = "";
+        for (char c : current) {
+            if (rules.find(c) != rules.end()) {
+                next += rules[c];
+            } else {
+                next += c;
+            }
+        }
+        current = next;
+    }
+    return current;
+}
+
+// Drawing Dragon Curves with SFML
+void drawDragonCurve(sf::RenderWindow& window, const std::string& lsystem,
+    float length, float angle) {
+    sf::VertexArray lines(sf::LinesStrip);
+    sf::Vector2f position(window.getSize().x / 2, window.getSize().y / 2);
+    float currentAngle = 0;
+
+    lines.append(sf::Vertex(position, sf::Color::White));
+
+    for (char command : lsystem) {
+        if (command == 'F') {
+            sf::Vector2f newPos(position.x + length * cos(currentAngle),
+                position.y + length * sin(currentAngle));
+            lines.append(sf::Vertex(newPos, sf::Color::White));
+            position = newPos;
+        } else if (command == '+') {
+            currentAngle += angle;
+        } else if (command == '-') {
+            currentAngle -= angle;
+        }
+    }
+
+    window.draw(lines);
+}
+
+// Generate monophonic audio samples
+std::vector<sf::Int16> generateTone(double frequency, int sampleRate, int durationMs) {
+    int sampleCount = sampleRate * durationMs / 1000;
+    std::vector<sf::Int16> samples(sampleCount);
+    double amplitude = 30000; // Volume
+
+    for (int i = 0; i < sampleCount; ++i) {
+        double t = static_cast<double>(i) / sampleRate;
+        samples[i] = static_cast<sf::Int16>(amplitude * sin(2 * M_PI * frequency * t));
+    }
+
+    return samples;
+}
+
+// Translating dragon curves into music
+void convertCurveToMusic(const std::string& lsystem) {
+    double baseFreq = 261.83;  // Frequency of the C4 tone
+    double semitoneRatio = pow(2.0, 1.0 / 12.0); // Frequency ratio between each semitone
+
+    double currentFreq = baseFreq;
+    int durationMs = 200;       
+    int durationStep = 20;      
+    int sampleRate = 44100;     // Audio Sample Rate
+
+    sf::SoundBuffer buffer;
+    sf::Sound sound;
+
+    for (char command : lsystem) {
+        if (command == '+') {
+            currentFreq *= semitoneRatio; // Raise a semitone
+            durationMs = std::min(durationMs + durationStep, 1000);  // Up to 1000ms
+        } else if (command == '-') {
+            currentFreq /= semitoneRatio; // Decrease by a semitone
+            durationMs = std::max(durationMs - durationStep, 50);   // 50ms minimum
+        }
+
+        if (command == '+' || command == '-') {
+            std::vector<sf::Int16> samples = generateTone(currentFreq, sampleRate, durationMs);
+
+            if (buffer.loadFromSamples(samples.data(), samples.size(), 1, sampleRate)) {
+                sound.setBuffer(buffer);
+                sound.play();
+                sf::sleep(sf::milliseconds(durationMs)); // Waiting for the note to finish playing
+            }
+        }
+    }
+}
+
+int main() {
+    std::unordered_map<char, std::string> rules = {
+        {'X', "X+YF+"},
+        {'Y', "-FX-Y"}
+    };
+
+    std::string axiom = "FX";  // Initial string of the L-System
+    int iterations = 10;       // Number of iterations
+    std::string lsystem = generateLSystem(iterations, axiom, rules);
+
+    // Setting up the SFML window
+    sf::RenderWindow window(sf::VideoMode(800, 800), " L-System");
+    window.setFramerateLimit(60);
+
+    // Drawing parameters
+    float length = 5;         // Length of each segment
+    float angle = M_PI / 2;   // 90 degrees
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed)
+                window.close();
+        }
+
+        window.clear(sf::Color::Black);
+        drawDragonCurve(window, lsystem, length, angle);
+        window.display();
+    }
+
+      // Convert curves to music
+    convertCurveToMusic(lsystem);
+
+    return 0;
+}

@@ -1,0 +1,202 @@
+#define _USE_MATH_DEFINES
+#include <SFML/Graphics.hpp>
+#include <string>
+#include <unordered_map>
+#include <cmath>
+#include <vector>
+#include <fstream>
+#include <iostream>
+#include <windows.h> 
+// Generate functions for the L-system
+std::string generateLSystem(const std::string& axiom, const std::unordered_map<char, std::string>& rules, int iterations) {
+    std::string current = axiom;
+
+    for (int i = 0; i < iterations; ++i) {
+        std::string next;
+
+        // Iterate over the current string and apply the rules
+        for (char ch : current) {
+            if (rules.find(ch) != rules.end()) {
+                next += rules.at(ch);
+            }
+            else {
+                next += ch;
+            }
+        }
+
+        current = next;
+    }
+
+    return current;
+}
+
+// Functions for drawing L-systems
+void drawLSystem(const std::string& commands, sf::RenderWindow& window, float length, float angle) {
+    sf::Vector2f position(200, 150); // Initial position
+    float currentAngle = 0; // Initial angle
+
+    struct State {
+        sf::Vector2f position;
+        float angle;
+    };
+
+    std::vector<State> stack;// Used to save position and angle
+
+    for (char command : commands) {
+        if (command == 'F') {
+            // Calculate the new position
+            sf::Vector2f newPosition = position + sf::Vector2f(length * std::cos(currentAngle), length * std::sin(currentAngle));
+            // Drawing Line Segments
+            sf::Vertex line[] = {
+                sf::Vertex(position, sf::Color::Black),
+                sf::Vertex(newPosition, sf::Color::Black)
+            };
+            window.draw(line, 2, sf::Lines);
+            // Update location
+            position = newPosition;
+        }
+        else if (command == '+') {
+            currentAngle += angle; // Clockwise rotation
+        }
+        else if (command == '-') {
+            currentAngle -= angle;  // Counterclockwise rotation
+        }
+        else if (command == '[') {
+            stack.push_back({ position, currentAngle }); // Save the current state
+        }
+        else if (command == ']') {
+            State state = stack.back();
+            stack.pop_back();
+            position = state.position; // Restore position
+            currentAngle = state.angle; // Restore angle
+        }
+    }
+}
+
+// Generate a musical score and save it to a text file
+void generateMusic(const std::string& commands, const std::string& filename) {
+    std::unordered_map<int, std::string> notes = {
+        {-2, "B"},
+        {-1, "B#"},
+        {0, "C"},
+        {1, "C#"},
+        {2, "D"},
+        {3, "D#"},
+        {4, "E"},
+        {5, "F"},
+        {6, "F#"},
+        {7, "G"},
+        {8, "G#"},
+        {9, "A"},
+        {10, "A#"},
+        {11, "B"}
+    };
+
+    int currentNote = 0; 
+
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Unable to open file: " << filename << std::endl;
+        return;
+    }
+
+    for (char command : commands) {
+        if (command == 'F') {
+            file << notes[currentNote % 12] << " ";
+        }
+        else if (command == '+') {
+            currentNote++;
+        }
+        else if (command == '-') {
+            currentNote--;
+        }
+    }
+
+    file.close();
+}
+
+// Functions that play music
+void playMusic(const std::string& commands) {
+     // Note-to-frequency mapping (in Hz)
+    std::unordered_map<int, int> noteFrequencies = {
+        {-2, 247},  // B (bass)
+        {-1, 262},  // B#
+        {0,  262},  // C
+        {1,  277},  // C#
+        {2,  294},  // D
+        {3,  311},  // D#
+        {4,  330},  // E
+        {5,  349},  // F
+        {6,  370},  // F#
+        {7,  392},  // G
+        {8,  415},  // G#
+        {9,  440},  // A
+        {10, 466},  // A#
+        {11, 494}   // B
+    };
+
+    int currentNote = 0; // Initial pitch for middle C
+
+    for (char command : commands) {
+        if (command == 'F') {
+            int frequency = noteFrequencies[currentNote % 12];
+            Beep(frequency, 500); // Play the current note (for 500 milliseconds)
+        }
+        else if (command == '+') {
+            currentNote++;
+        }
+        else if (command == '-') {
+            currentNote--;
+        }
+    }
+}
+
+int main() {
+    
+    std::unordered_map<char, std::string> rules;
+    rules['F'] = "F+F--F+F"; 
+
+     std::string axiom = "F";
+
+    
+    int iterations = 2;
+
+    // Generate L-system strings
+    std::string lSystemString = generateLSystem(axiom, rules, iterations);
+
+
+
+    // Generate a musical score and save it to a file
+    std::string filename = "music.txt";
+    generateMusic(lSystemString, filename);
+    std::cout << "The score has been saved to the file: " << filename << std::endl;
+
+    // Open the generated file using ShellExecuteA
+    ShellExecuteA(nullptr, "open", filename.c_str(), nullptr, nullptr, SW_SHOW);
+
+
+
+    // Create a window
+    sf::RenderWindow window(sf::VideoMode(800, 600), "L-System");
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed)
+                window.close();
+        }
+
+        window.clear(sf::Color::White);
+     
+   drawLSystem(lSystemString, window, 5.0f, M_PI / 3); // 60 degree
+
+        window.display();
+    }
+
+
+    
+    playMusic(lSystemString);
+
+
+    return 0;
+}
